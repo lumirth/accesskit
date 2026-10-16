@@ -256,10 +256,23 @@ impl SubclassingAdapter {
     }
 }
 
+fn has_our_subclass(view: &NSView, prev_class: &'static AnyClass) -> bool {
+    let current: *const AnyClass = view.class();
+    let subclasses = SUBCLASSES.lock().unwrap();
+    subclasses
+        .iter()
+        .any(|entry| std::ptr::eq(entry.0, prev_class) && std::ptr::eq(entry.1, current))
+}
+
 impl Drop for SubclassingAdapter {
     fn drop(&mut self) {
         let prev_class = self.associated.ivars().prev_class;
         let view = Id::as_ptr(&self.view) as *mut NSView;
+        // Preserve AppKit's KVO subclass and its observer bookkeeping.
+        // https://github.com/AccessKit/accesskit/pull/822
+        if !has_our_subclass(unsafe { &*view }, prev_class) {
+            return;
+        }
         unsafe { object_setClass(view as *mut _, (prev_class as *const AnyClass).cast()) };
         unsafe {
             objc_setAssociatedObject(
